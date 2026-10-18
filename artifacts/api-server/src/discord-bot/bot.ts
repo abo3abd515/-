@@ -38,7 +38,6 @@ const CATEGORY_LIMIT = 25;
 
 function buildHelpMessage() {
   const embed = new EmbedBuilder()
-    .setColor(0x5865f2)
     .setTitle("مساعدة بوت التكت")
     .setDescription(
       [
@@ -46,7 +45,7 @@ function buildHelpMessage() {
         "",
         "• **تنصيب التكت:** اختر رومًا لنشر لوحة فتح التذاكر.",
         "• **خيارات التكت:** أضف أو احذف أنواع التذاكر.",
-        "• **منشن التكت:** اختر دورًا أو عضوًا لتنبيهه عند فتح التذكرة.",
+        "• **تنبيه التكت:** اختر دورًا أو عضوًا لإرسال تنبيه خاص له عند فتح التذكرة.",
         "• **مظهر لوحة التكت:** غيّر نص وصورة رسالة فتح التكت.",
         "• **مظهر البوت:** غيّر الاسم والصورة وحالة النشاط.",
         "",
@@ -69,8 +68,8 @@ function buildHelpMessage() {
         value: "categories",
       },
       {
-        label: "منشن التكت",
-        description: "اختر دورًا أو عضوًا لتنبيهه عند فتح تذكرة",
+        label: "تنبيه التكت",
+        description: "اختر دورًا أو عضوًا لإرسال رسالة خاصة إليه",
         value: "mentions",
       },
       {
@@ -93,7 +92,6 @@ function buildHelpMessage() {
 
 function buildPanelPayload(config: GuildTicketConfig) {
   const embed = new EmbedBuilder()
-    .setColor(0x5865f2)
     .setTitle(config.panelTitle)
     .setDescription(config.panelDescription);
 
@@ -330,10 +328,9 @@ function createMentionManager(config: GuildTicketConfig) {
       : `الإعداد الحالي: عضو <@${config.ticketMentionTarget.id}>`
     : "لا يوجد منشن محدد حاليًا.";
   const embed = new EmbedBuilder()
-    .setColor(0x5865f2)
-    .setTitle("منشن عند فتح التكت")
+    .setTitle("تنبيه خاص عند فتح التكت")
     .setDescription(
-      `${currentTarget}\n\nاختر دورًا أو عضوًا. سيحصل الهدف على صلاحية رؤية التكت والرد فيه.`,
+      `${currentTarget}\n\nاختر دورًا أو عضوًا. سيصله تنبيه خاص وسيتمكن من رؤية التكت والرد فيه.`,
     );
   const role = new RoleSelectMenuBuilder()
     .setCustomId("ticketbot:mention-role-select")
@@ -343,7 +340,7 @@ function createMentionManager(config: GuildTicketConfig) {
     .setPlaceholder("اختر عضوًا");
   const clear = new ButtonBuilder()
     .setCustomId("ticketbot:mention-clear")
-    .setLabel("إزالة المنشن")
+    .setLabel("إزالة التنبيه")
     .setStyle(ButtonStyle.Danger)
     .setDisabled(!config.ticketMentionTarget);
 
@@ -365,7 +362,6 @@ function createCategoryManager(config: GuildTicketConfig) {
           .join("\n")
       : "لا توجد خيارات حاليًا.";
   const embed = new EmbedBuilder()
-    .setColor(0x5865f2)
     .setTitle("إدارة خيارات التكت")
     .setDescription(description)
     .setFooter({ text: `الحد الأقصى ${CATEGORY_LIMIT} خيارًا` });
@@ -421,6 +417,15 @@ async function handleHelpMenu(
   if (!choice) {
     await replyEphemeral(interaction, "لم يتم اختيار إجراء.");
     return;
+  }
+
+  try {
+    await interaction.message.edit(buildHelpMessage());
+  } catch (error) {
+    logger.warn(
+      { err: error, guildId: guild.id },
+      "Could not reset the help menu selection",
+    );
   }
 
   if (choice === "setup") {
@@ -574,6 +579,14 @@ async function createTicket(
   }
 
   const config = await getGuildConfig(guild.id);
+  try {
+    await interaction.message.edit(buildPanelPayload(config));
+  } catch (error) {
+    logger.warn(
+      { err: error, guildId: guild.id },
+      "Could not reset the ticket panel selection",
+    );
+  }
   const categoryId = interaction.values[0];
   const category = config.categories.find((item) => item.id === categoryId);
   if (!category) {
@@ -699,7 +712,6 @@ async function createTicket(
     });
 
     const ticketEmbed = new EmbedBuilder()
-      .setColor(0x5865f2)
       .setTitle(`تذكرة ${category.label}`)
       .setDescription(
         [
@@ -710,27 +722,10 @@ async function createTicket(
       )
       .setTimestamp();
     const controlMessage = await channel.send({
-      content: [
-        `<@${interaction.user.id}>`,
-        config.ticketMentionTarget?.type === "role"
-          ? `<@&${config.ticketMentionTarget.id}>`
-          : mentionedUserId
-            ? `<@${mentionedUserId}>`
-            : null,
-      ]
-        .filter(Boolean)
-        .join(" "),
+      content: `<@${interaction.user.id}>`,
       embeds: [ticketEmbed],
       components: buildTicketControls(),
-      allowedMentions: {
-        users: mentionedUserId
-          ? [interaction.user.id, mentionedUserId]
-          : [interaction.user.id],
-        roles:
-          config.ticketMentionTarget?.type === "role"
-            ? [config.ticketMentionTarget.id]
-            : [],
-      },
+      allowedMentions: { users: [interaction.user.id] },
     });
     await updateGuildConfig(guild.id, (currentConfig) => {
       const stored = currentConfig.tickets.find(
@@ -750,7 +745,123 @@ async function createTicket(
     throw error;
   }
 
-  await interaction.editReply(`تم فتح تذكرتك: <#${channel.id}>`);
+  const notificationSummary = await sendPrivateTicketNotification({
+    guild,
+    channel,
+    openerId: interaction.user.id,
+    openerName: interaction.user.tag,
+    categoryLabel: category.label,
+    target: config.ticketMentionTarget,
+  });
+  await interaction.editReply(
+    `تم فتح تذكرتك: <#${channel.id}>${notificationSummary ? `\n${notificationSummary}` : ""}`,
+  );
+}
+
+async function sendPrivateTicketNotification({
+  guild,
+  channel,
+  openerId,
+  openerName,
+  categoryLabel,
+  target,
+}: {
+  guild: Guild;
+  channel: TextChannel;
+  openerId: string;
+  openerName: string;
+  categoryLabel: string;
+  target: GuildTicketConfig["ticketMentionTarget"];
+}): Promise<string | null> {
+  if (!target) {
+    return null;
+  }
+
+  let recipients: import("discord.js").GuildMember[] = [];
+  if (target.type === "user") {
+    const member = await guild.members.fetch(target.id).catch(() => null);
+    if (!member) {
+      return "تعذر إرسال التنبيه الخاص؛ العضو المحدد لم يعد في السيرفر.";
+    }
+    if (member.user.bot || member.id === openerId) {
+      return "تم فتح التكت، لكن لم يُرسل تنبيه لأن العضو المحدد هو صاحب التكت أو بوت.";
+    }
+    recipients = [member];
+  } else {
+    const role = await guild.roles.fetch(target.id).catch(() => null);
+    if (!role) {
+      return "تعذر إرسال التنبيه الخاص؛ دور الإدارة المحدد لم يعد موجودًا.";
+    }
+    try {
+      const members = await guild.members.fetch();
+      recipients = members
+        .filter(
+          (member) =>
+            member.roles.cache.has(role.id) &&
+            !member.user.bot &&
+            member.id !== openerId,
+        )
+        .map((member) => member);
+    } catch (error) {
+      logger.error(
+        { err: error, guildId: guild.id, roleId: role.id },
+        "Could not fetch role members for ticket notifications",
+      );
+      return "تعذر إرسال الرسالة الخاصة لأعضاء الدور. تأكد من تفعيل Server Members Intent في إعدادات البوت.";
+    }
+  }
+
+  if (recipients.length === 0) {
+    return "ما فيه أعضاء متاحون في الخيار المحدد لاستلام التنبيه الخاص.";
+  }
+
+  let nextRecipient = 0;
+  let sent = 0;
+  let failed = 0;
+  const ticketUrl = `https://discord.com/channels/${guild.id}/${channel.id}`;
+  const workers = Array.from(
+    { length: Math.min(5, recipients.length) },
+    async () => {
+      while (nextRecipient < recipients.length) {
+        const recipient = recipients[nextRecipient];
+        nextRecipient += 1;
+        try {
+          await recipient.send({
+            content: [
+              `تم فتح تكت جديد في سيرفر **${guild.name}**.`,
+              `صاحب التكت: **${openerName}**`,
+              `نوع التكت: **${categoryLabel}**`,
+            ].join("\n"),
+            components: [
+              new ActionRowBuilder<ButtonBuilder>().addComponents(
+                new ButtonBuilder()
+                  .setLabel("فتح التكت")
+                  .setStyle(ButtonStyle.Link)
+                  .setURL(ticketUrl),
+              ),
+            ],
+            allowedMentions: { parse: [] },
+          });
+          sent += 1;
+        } catch (error) {
+          failed += 1;
+          logger.warn(
+            { err: error, guildId: guild.id, recipientId: recipient.id },
+            "Could not send private ticket notification",
+          );
+        }
+      }
+    },
+  );
+  await Promise.all(workers);
+
+  if (failed === 0) {
+    return `وصل التنبيه الخاص إلى ${sent} ${target.type === "role" ? "من أعضاء الدور" : "للعضو المحدد"}.`;
+  }
+  if (sent === 0) {
+    return "تم فتح التكت، لكن تعذر إرسال التنبيه الخاص. قد تكون الرسائل الخاصة مغلقة لدى المستلمين.";
+  }
+  return `وصل التنبيه الخاص إلى ${sent}، وتعذر إرساله إلى ${failed}؛ قد تكون الرسائل الخاصة مغلقة لدى بعض المستلمين.`;
 }
 
 async function showCategoryRemoval(
@@ -913,13 +1024,6 @@ async function saveMentionTarget(
       await replyEphemeral(interaction, "لم أجد هذا الدور في السيرفر.");
       return;
     }
-    if (!role.mentionable) {
-      await replyEphemeral(
-        interaction,
-        "الدور غير قابل للمنشن. فعّل خيار السماح بمنشن الدور من إعدادات الدور في Discord ثم حاول مرة ثانية.",
-      );
-      return;
-    }
   } else {
     const member = await guild.members.fetch(id).catch(() => null);
     if (!member) {
@@ -934,8 +1038,8 @@ async function saveMentionTarget(
   await replyEphemeral(
     interaction,
     targetType === "role"
-      ? "تم ضبط الدور للمنشن عند فتح التكت، وسيتمكن من رؤية التكت والرد فيه."
-      : "تم ضبط العضو للمنشن عند فتح التكت، وسيتمكن من رؤية التكت والرد فيه.",
+      ? "تم ضبط الدور لإرسال تنبيه خاص إلى أعضائه عند فتح التكت."
+      : "تم ضبط العضو لإرسال تنبيه خاص إليه عند فتح التكت.",
   );
 }
 
@@ -1244,7 +1348,7 @@ async function handleInteraction(
           config.ticketMentionTarget = null;
         });
         await interaction.editReply({
-          content: "تمت إزالة المنشن من التذاكر الجديدة.",
+          content: "تمت إزالة التنبيهات الخاصة من التذاكر الجديدة.",
           embeds: [],
           components: [],
         });
@@ -1269,6 +1373,7 @@ export async function startDiscordBot(): Promise<void> {
   const client = new Client({
     intents: [
       GatewayIntentBits.Guilds,
+      GatewayIntentBits.GuildMembers,
       GatewayIntentBits.GuildMessages,
       GatewayIntentBits.MessageContent,
     ],

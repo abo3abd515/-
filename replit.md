@@ -10,7 +10,7 @@ A Discord bot that lets server admins configure private support tickets, manage 
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
 - Required secret: `DISCORD_BOT_TOKEN` — Discord bot token; never log or commit it
-- Enable Discord's Message Content Intent in the bot's Developer Portal application settings for `-help`
+- Enable Discord's Message Content Intent for `-help` and Server Members Intent for private ticket notifications.
 
 ## Stack
 
@@ -36,7 +36,7 @@ A Discord bot that lets server admins configure private support tickets, manage 
 ## Product
 
 - `-help` opens an interactive Arabic admin menu for ticket setup, ticket categories, and bot profile settings.
-- Admins choose an optional role or member to mention when a ticket opens; the selected target can view and reply in tickets.
+- Admins choose an optional role or member to receive a private notification when a ticket opens; the selected target can view and reply in tickets.
 - Admins customize the ticket panel's title, description, and HTTPS image URL. Closing a ticket requires confirmation and deletes the channel and its messages.
 - Members open private tickets from a posted panel; ticket channels contain owner/category/time details and close/summon controls.
 
