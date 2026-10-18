@@ -965,7 +965,7 @@ async function handleInteraction(
 }
 
 export async function startDiscordBot(): Promise<void> {
-  const token = process.env["DISCORD_BOT_TOKEN"];
+  const token = process.env["DISCORD_BOT_TOKEN"]?.trim();
   if (!token) {
     throw new Error(
       "DISCORD_BOT_TOKEN is missing. Add it in Replit Secrets before starting the Discord bot.",
