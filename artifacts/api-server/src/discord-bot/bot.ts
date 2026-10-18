@@ -10,9 +10,11 @@ import {
   GatewayIntentBits,
   ModalBuilder,
   PermissionFlagsBits,
+  RoleSelectMenuBuilder,
   StringSelectMenuBuilder,
   TextInputBuilder,
   TextInputStyle,
+  UserSelectMenuBuilder,
   type Guild,
   type Interaction,
   type Message,
@@ -44,6 +46,8 @@ function buildHelpMessage() {
         "",
         "• **تنصيب التكت:** اختر رومًا لنشر لوحة فتح التذاكر.",
         "• **خيارات التكت:** أضف أو احذف أنواع التذاكر.",
+        "• **منشن التكت:** اختر دورًا أو عضوًا لتنبيهه عند فتح التذكرة.",
+        "• **مظهر لوحة التكت:** غيّر نص وصورة رسالة فتح التكت.",
         "• **مظهر البوت:** غيّر الاسم والصورة وحالة النشاط.",
         "",
         "تغيير وصف البوت (Bio) يتم يدويًا من Discord Developer Portal.",
@@ -65,6 +69,16 @@ function buildHelpMessage() {
         value: "categories",
       },
       {
+        label: "منشن التكت",
+        description: "اختر دورًا أو عضوًا لتنبيهه عند فتح تذكرة",
+        value: "mentions",
+      },
+      {
+        label: "مظهر لوحة التكت",
+        description: "تعديل نص وصورة رسالة فتح التكت",
+        value: "panel-appearance",
+      },
+      {
         label: "مظهر البوت",
         description: "تغيير الاسم والصورة وحالة النشاط",
         value: "appearance",
@@ -80,8 +94,12 @@ function buildHelpMessage() {
 function buildPanelPayload(config: GuildTicketConfig) {
   const embed = new EmbedBuilder()
     .setColor(0x5865f2)
-    .setTitle("الدعم الفني")
-    .setDescription("لفتح تذكرة، اختر نوع الطلب من القائمة أدناه.");
+    .setTitle(config.panelTitle)
+    .setDescription(config.panelDescription);
+
+  if (config.panelImageUrl) {
+    embed.setImage(config.panelImageUrl);
+  }
 
   const menu = new StringSelectMenuBuilder()
     .setCustomId(PANEL_MENU_ID)
@@ -270,6 +288,75 @@ function createAppearanceModal(): ModalBuilder {
     );
 }
 
+function createPanelAppearanceModal(config: GuildTicketConfig): ModalBuilder {
+  const title = new TextInputBuilder()
+    .setCustomId("panelTitle")
+    .setLabel("عنوان لوحة التكت")
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true)
+    .setMaxLength(100)
+    .setValue(config.panelTitle);
+  const description = new TextInputBuilder()
+    .setCustomId("panelDescription")
+    .setLabel("النص الظاهر في اللوحة")
+    .setStyle(TextInputStyle.Paragraph)
+    .setRequired(true)
+    .setMaxLength(1000)
+    .setValue(config.panelDescription);
+  const imageUrl = new TextInputBuilder()
+    .setCustomId("panelImageUrl")
+    .setLabel("رابط صورة مباشر (اختياري)")
+    .setStyle(TextInputStyle.Short)
+    .setRequired(false)
+    .setMaxLength(500);
+  if (config.panelImageUrl) {
+    imageUrl.setValue(config.panelImageUrl);
+  }
+
+  return new ModalBuilder()
+    .setCustomId("ticketbot:panel-appearance-modal")
+    .setTitle("مظهر لوحة فتح التكت")
+    .addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(title),
+      new ActionRowBuilder<TextInputBuilder>().addComponents(description),
+      new ActionRowBuilder<TextInputBuilder>().addComponents(imageUrl),
+    );
+}
+
+function createMentionManager(config: GuildTicketConfig) {
+  const currentTarget = config.ticketMentionTarget
+    ? config.ticketMentionTarget.type === "role"
+      ? `الإعداد الحالي: دور <@&${config.ticketMentionTarget.id}>`
+      : `الإعداد الحالي: عضو <@${config.ticketMentionTarget.id}>`
+    : "لا يوجد منشن محدد حاليًا.";
+  const embed = new EmbedBuilder()
+    .setColor(0x5865f2)
+    .setTitle("منشن عند فتح التكت")
+    .setDescription(
+      `${currentTarget}\n\nاختر دورًا أو عضوًا. سيحصل الهدف على صلاحية رؤية التكت والرد فيه.`,
+    );
+  const role = new RoleSelectMenuBuilder()
+    .setCustomId("ticketbot:mention-role-select")
+    .setPlaceholder("اختر دور الإدارة");
+  const user = new UserSelectMenuBuilder()
+    .setCustomId("ticketbot:mention-user-select")
+    .setPlaceholder("اختر عضوًا");
+  const clear = new ButtonBuilder()
+    .setCustomId("ticketbot:mention-clear")
+    .setLabel("إزالة المنشن")
+    .setStyle(ButtonStyle.Danger)
+    .setDisabled(!config.ticketMentionTarget);
+
+  return {
+    embeds: [embed],
+    components: [
+      new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(role),
+      new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(user),
+      new ActionRowBuilder<ButtonBuilder>().addComponents(clear),
+    ],
+  };
+}
+
 function createCategoryManager(config: GuildTicketConfig) {
   const description =
     config.categories.length > 0
@@ -355,6 +442,29 @@ async function handleHelpMenu(
       ...createCategoryManager(config),
       ephemeral: true,
     });
+    return;
+  }
+
+  if (choice === "mentions") {
+    if (!isAdministrator(interaction)) {
+      await replyEphemeral(interaction, "يحتاج هذا الإجراء إلى صلاحية المشرف.");
+      return;
+    }
+    const config = await getGuildConfig(guild.id);
+    await interaction.reply({
+      ...createMentionManager(config),
+      ephemeral: true,
+    });
+    return;
+  }
+
+  if (choice === "panel-appearance") {
+    if (!isAdministrator(interaction)) {
+      await replyEphemeral(interaction, "يحتاج هذا الإجراء إلى صلاحية المشرف.");
+      return;
+    }
+    const config = await getGuildConfig(guild.id);
+    await interaction.showModal(createPanelAppearanceModal(config));
     return;
   }
 
@@ -507,6 +617,19 @@ async function createTicket(
     return;
   }
 
+  const supportRoleIds = new Set<string>();
+  if (config.supportRoleId) {
+    supportRoleIds.add(config.supportRoleId);
+  }
+  if (config.ticketMentionTarget?.type === "role") {
+    supportRoleIds.add(config.ticketMentionTarget.id);
+  }
+  const mentionedUserId =
+    config.ticketMentionTarget?.type === "user" &&
+    config.ticketMentionTarget.id !== interaction.user.id
+      ? config.ticketMentionTarget.id
+      : null;
+
   const channel = await guild.channels.create({
     name: `ticket-${safeUsername}-${safeCategory}`.slice(0, 90),
     type: ChannelType.GuildText,
@@ -536,10 +659,18 @@ async function createTicket(
           PermissionFlagsBits.ManageMessages,
         ],
       },
-      ...(config.supportRoleId
+      ...Array.from(supportRoleIds, (roleId) => ({
+        id: roleId,
+        allow: [
+          PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.SendMessages,
+          PermissionFlagsBits.ReadMessageHistory,
+        ],
+      })),
+      ...(mentionedUserId
         ? [
             {
-              id: config.supportRoleId,
+              id: mentionedUserId,
               allow: [
                 PermissionFlagsBits.ViewChannel,
                 PermissionFlagsBits.SendMessages,
@@ -579,10 +710,27 @@ async function createTicket(
       )
       .setTimestamp();
     const controlMessage = await channel.send({
-      content: `<@${interaction.user.id}>`,
+      content: [
+        `<@${interaction.user.id}>`,
+        config.ticketMentionTarget?.type === "role"
+          ? `<@&${config.ticketMentionTarget.id}>`
+          : mentionedUserId
+            ? `<@${mentionedUserId}>`
+            : null,
+      ]
+        .filter(Boolean)
+        .join(" "),
       embeds: [ticketEmbed],
       components: buildTicketControls(),
-      allowedMentions: { users: [interaction.user.id] },
+      allowedMentions: {
+        users: mentionedUserId
+          ? [interaction.user.id, mentionedUserId]
+          : [interaction.user.id],
+        roles:
+          config.ticketMentionTarget?.type === "role"
+            ? [config.ticketMentionTarget.id]
+            : [],
+      },
     });
     await updateGuildConfig(guild.id, (currentConfig) => {
       const stored = currentConfig.tickets.find(
@@ -703,6 +851,94 @@ async function setBotAppearance(
   await interaction.editReply(outcomes.join("\n"));
 }
 
+async function setPanelAppearance(
+  interaction: import("discord.js").ModalSubmitInteraction,
+  guild: Guild,
+): Promise<void> {
+  const title = interaction.fields.getTextInputValue("panelTitle").trim();
+  const description = interaction.fields
+    .getTextInputValue("panelDescription")
+    .trim();
+  const rawImageUrl = interaction.fields
+    .getTextInputValue("panelImageUrl")
+    .trim();
+
+  if (!title || !description) {
+    await replyEphemeral(interaction, "اكتب عنوانًا ونصًا للوحة التكت.");
+    return;
+  }
+
+  let imageUrl: string | null = null;
+  if (rawImageUrl) {
+    try {
+      const parsedUrl = new URL(rawImageUrl);
+      if (parsedUrl.protocol !== "https:") {
+        throw new Error("Image URL must use HTTPS.");
+      }
+      imageUrl = parsedUrl.toString();
+    } catch {
+      await replyEphemeral(interaction, "رابط الصورة غير صحيح؛ استخدم رابطًا مباشرًا يبدأ بـ HTTPS.");
+      return;
+    }
+  }
+
+  const updated = await updateGuildConfig(guild.id, (config) => {
+    config.panelTitle = title;
+    config.panelDescription = description;
+    config.panelImageUrl = imageUrl;
+  });
+  await refreshTicketPanel(guild, updated);
+  await interaction.reply({
+    content: updated.panelChannelId
+      ? "تم حفظ مظهر اللوحة وتحديث رسالة فتح التكت."
+      : "تم حفظ مظهر اللوحة. سيظهر عند تنصيبها في الروم.",
+    ephemeral: true,
+  });
+}
+
+async function saveMentionTarget(
+  interaction: Interaction,
+  guild: Guild,
+  targetType: "role" | "user",
+  id: string,
+): Promise<void> {
+  if (!/^\d{17,22}$/.test(id)) {
+    await replyEphemeral(interaction, "الـID غير صحيح. انسخه من Discord وحاول مرة أخرى.");
+    return;
+  }
+
+  if (targetType === "role") {
+    const role = await guild.roles.fetch(id).catch(() => null);
+    if (!role) {
+      await replyEphemeral(interaction, "لم أجد هذا الدور في السيرفر.");
+      return;
+    }
+    if (!role.mentionable) {
+      await replyEphemeral(
+        interaction,
+        "الدور غير قابل للمنشن. فعّل خيار السماح بمنشن الدور من إعدادات الدور في Discord ثم حاول مرة ثانية.",
+      );
+      return;
+    }
+  } else {
+    const member = await guild.members.fetch(id).catch(() => null);
+    if (!member) {
+      await replyEphemeral(interaction, "لم أجد هذا العضو في السيرفر.");
+      return;
+    }
+  }
+
+  await updateGuildConfig(guild.id, (config) => {
+    config.ticketMentionTarget = { type: targetType, id };
+  });
+  await replyEphemeral(
+    interaction,
+    targetType === "role"
+      ? "تم ضبط الدور للمنشن عند فتح التكت، وسيتمكن من رؤية التكت والرد فيه."
+      : "تم ضبط العضو للمنشن عند فتح التكت، وسيتمكن من رؤية التكت والرد فيه.",
+  );
+}
+
 async function handleModal(
   interaction: import("discord.js").ModalSubmitInteraction,
   client: Client,
@@ -751,6 +987,8 @@ async function handleModal(
     });
   } else if (interaction.customId === "ticketbot:appearance-modal") {
     await setBotAppearance(interaction, client);
+  } else if (interaction.customId === "ticketbot:panel-appearance-modal") {
+    await setPanelAppearance(interaction, guild);
   }
 }
 
@@ -786,11 +1024,6 @@ async function confirmCloseTicket(
   }
 
   await interaction.deferUpdate();
-  await channel.permissionOverwrites.edit(ticketInfo.ticket.openerId, {
-    SendMessages: false,
-    AttachFiles: false,
-  });
-
   const closedAt = new Date().toISOString();
   await updateGuildConfig(ticketInfo.guildId, (currentConfig) => {
     const stored = currentConfig.tickets.find(
@@ -802,19 +1035,27 @@ async function confirmCloseTicket(
   });
 
   try {
-    const textChannel = channel as TextChannel;
-    const controlMessage = await textChannel.messages.fetch(
-      ticketInfo.ticket.controlMessageId,
+    await (channel as TextChannel).delete(
+      `Ticket closed by ${interaction.user.tag}`,
     );
-    await controlMessage.edit({
-      content: "تم إغلاق هذا التكت.",
-      components: buildTicketControls(true),
-    });
   } catch (error) {
-    logger.warn({ err: error, channelId: channel.id }, "Could not update ticket controls");
+    await updateGuildConfig(ticketInfo.guildId, (currentConfig) => {
+      const stored = currentConfig.tickets.find(
+        (ticket) => ticket.channelId === ticketInfo.ticket.channelId,
+      );
+      if (stored) {
+        stored.closedAt = null;
+      }
+    });
+    logger.error({ err: error, channelId: channel.id }, "Could not delete closed ticket");
+    await interaction.editReply({
+      content: "تعذر حذف الروم. تأكد أن البوت يملك صلاحية Manage Channels.",
+      components: [],
+    });
+    return;
   }
   await interaction.editReply({
-    content: "تم إغلاق التكت. أصبح بإمكان صاحبه القراءة دون الكتابة.",
+    content: "تم إغلاق التكت وحذف الروم ورسائله.",
     components: [],
   });
 }
@@ -846,14 +1087,14 @@ async function handleTicketButton(
 
     const confirm = new ButtonBuilder()
       .setCustomId("ticketbot:confirm-close")
-      .setLabel("تأكيد الإغلاق")
+      .setLabel("تأكيد الإغلاق والحذف")
       .setStyle(ButtonStyle.Danger);
     const cancel = new ButtonBuilder()
       .setCustomId("ticketbot:cancel-close")
       .setLabel("إلغاء")
       .setStyle(ButtonStyle.Secondary);
     await interaction.reply({
-      content: "هل أنت متأكد من إغلاق التكت؟",
+      content: "إغلاق التكت سيحذف الروم وجميع رسائله نهائيًا. هل تريد المتابعة؟",
       components: [
         new ActionRowBuilder<ButtonBuilder>().addComponents(confirm, cancel),
       ],
@@ -916,6 +1157,48 @@ async function handleInteraction(
   interaction: Interaction,
   client: Client,
 ): Promise<void> {
+  if (
+    interaction.isRoleSelectMenu() &&
+    interaction.customId === "ticketbot:mention-role-select"
+  ) {
+    const guild = await requireGuild(interaction);
+    if (!guild) {
+      return;
+    }
+    if (!isAdministrator(interaction)) {
+      await replyEphemeral(interaction, "يحتاج هذا الإجراء إلى صلاحية المشرف.");
+      return;
+    }
+    const roleId = interaction.values[0];
+    if (!roleId) {
+      await replyEphemeral(interaction, "لم يتم اختيار دور.");
+      return;
+    }
+    await saveMentionTarget(interaction, guild, "role", roleId);
+    return;
+  }
+
+  if (
+    interaction.isUserSelectMenu() &&
+    interaction.customId === "ticketbot:mention-user-select"
+  ) {
+    const guild = await requireGuild(interaction);
+    if (!guild) {
+      return;
+    }
+    if (!isAdministrator(interaction)) {
+      await replyEphemeral(interaction, "يحتاج هذا الإجراء إلى صلاحية المشرف.");
+      return;
+    }
+    const userId = interaction.values[0];
+    if (!userId) {
+      await replyEphemeral(interaction, "لم يتم اختيار عضو.");
+      return;
+    }
+    await saveMentionTarget(interaction, guild, "user", userId);
+    return;
+  }
+
   if (interaction.isStringSelectMenu()) {
     if (interaction.customId === HELP_MENU_ID) {
       await handleHelpMenu(interaction, client);
@@ -940,7 +1223,8 @@ async function handleInteraction(
       await confirmCloseTicket(interaction);
     } else if (
       interaction.customId === "ticketbot:category-add" ||
-      interaction.customId === "ticketbot:category-remove"
+      interaction.customId === "ticketbot:category-remove" ||
+      interaction.customId === "ticketbot:mention-clear"
     ) {
       const guild = await requireGuild(interaction);
       if (!guild) {
@@ -952,8 +1236,18 @@ async function handleInteraction(
       }
       if (interaction.customId === "ticketbot:category-add") {
         await interaction.showModal(createCategoryModal());
-      } else {
+      } else if (interaction.customId === "ticketbot:category-remove") {
         await showCategoryRemoval(interaction, guild);
+      } else {
+        await interaction.deferUpdate();
+        await updateGuildConfig(guild.id, (config) => {
+          config.ticketMentionTarget = null;
+        });
+        await interaction.editReply({
+          content: "تمت إزالة المنشن من التذاكر الجديدة.",
+          embeds: [],
+          components: [],
+        });
       }
     }
     return;

@@ -36,6 +36,8 @@ A Discord bot that lets server admins configure private support tickets, manage 
 ## Product
 
 - `-help` opens an interactive Arabic admin menu for ticket setup, ticket categories, and bot profile settings.
+- Admins choose an optional role or member to mention when a ticket opens; the selected target can view and reply in tickets.
+- Admins customize the ticket panel's title, description, and HTTPS image URL. Closing a ticket requires confirmation and deletes the channel and its messages.
 - Members open private tickets from a posted panel; ticket channels contain owner/category/time details and close/summon controls.
 
 ## User preferences

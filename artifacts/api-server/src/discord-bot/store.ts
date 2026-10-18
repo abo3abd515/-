@@ -21,6 +21,10 @@ export interface GuildTicketConfig {
   panelChannelId: string | null;
   panelMessageId: string | null;
   supportRoleId: string | null;
+  ticketMentionTarget: { type: "role" | "user"; id: string } | null;
+  panelTitle: string;
+  panelDescription: string;
+  panelImageUrl: string | null;
   categories: TicketCategory[];
   tickets: TicketRecord[];
 }
@@ -42,6 +46,10 @@ function newGuildConfig(): GuildTicketConfig {
     panelChannelId: null,
     panelMessageId: null,
     supportRoleId: null,
+    ticketMentionTarget: null,
+    panelTitle: "الدعم الفني",
+    panelDescription: "لفتح تذكرة، اختر نوع الطلب من القائمة أدناه.",
+    panelImageUrl: null,
     categories: [
       {
         id: "general",
@@ -78,7 +86,39 @@ async function loadState(): Promise<void> {
         ) {
           throw new Error("Discord ticket configuration has an invalid format.");
         }
-        state = parsed as PersistentState;
+        const loaded = parsed as PersistentState;
+        state = {
+          guilds: Object.fromEntries(
+            Object.entries(loaded.guilds).map(([guildId, stored]) => {
+              const defaults = newGuildConfig();
+              const config = stored as Partial<GuildTicketConfig>;
+              return [
+                guildId,
+                {
+                  ...defaults,
+                  ...config,
+                  ticketMentionTarget:
+                    config.ticketMentionTarget?.type === "role" ||
+                    config.ticketMentionTarget?.type === "user"
+                      ? config.ticketMentionTarget
+                      : null,
+                  panelTitle:
+                    typeof config.panelTitle === "string"
+                      ? config.panelTitle
+                      : defaults.panelTitle,
+                  panelDescription:
+                    typeof config.panelDescription === "string"
+                      ? config.panelDescription
+                      : defaults.panelDescription,
+                  panelImageUrl:
+                    typeof config.panelImageUrl === "string"
+                      ? config.panelImageUrl
+                      : null,
+                } satisfies GuildTicketConfig,
+              ];
+            }),
+          ),
+        };
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
           throw error;
